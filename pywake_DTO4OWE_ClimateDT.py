@@ -197,33 +197,55 @@ if __name__ == '__main__':
     ######################3
     # OPEN DASK CLUSTER
     local_dir = '/users/nummelin/Projects/DTO4OWE/'
-    if not Path(local_dir).is_dir():
-        os.system('mkdir -p '+local_dir)
-        print('created folder '+local_dir)
+    #if not Path(local_dir).is_dir():
+    #    os.system('mkdir -p '+local_dir)
+    #    print('created folder '+local_dir)
     #
-    n_workers = 1
-    n_threads = 1
-    processes = True
-    cluster   = dask.distributed.LocalCluster(n_workers=n_workers,
-                                              threads_per_worker=n_threads,
-                                              processes=processes,
-                                              local_directory=local_dir,
-                                              lifetime='12 hour',
-                                              lifetime_stagger='10 minutes',
-                                              lifetime_restart=True,
-                                              dashboard_address=None,
-                                              worker_dashboard_address=None)
-    client  = dask.distributed.Client(cluster)
+    #n_workers = 1
+    #n_threads = 1
+    #processes = True
+    #cluster   = dask.distributed.LocalCluster(n_workers=n_workers,
+    #                                          threads_per_worker=n_threads,
+    #                                          processes=processes,
+    #                                          local_directory=local_dir,
+    #                                          lifetime='12 hour',
+    #                                          lifetime_stagger='10 minutes',
+    #                                          lifetime_restart=True,
+    #                                          dashboard_address=None,
+    #                                          worker_dashboard_address=None)
+    #client  = dask.distributed.Client(cluster)
     ###########################
     # BASIC SETTINGS
     year    = int(argv[1])
     month   = int(argv[2])
     day0    = int(argv[3])
+    steps_in_day = 24 #time freq of the data (hourly = 24, 3 hourly = 8)
+    preproc=False
+    #        
     print(year, month)
     if year<2015:
         exp='hist'
     else:
         exp='ssp3-7.0'
+    #
+    if len(argv)>4:
+        datapath=argv[4]+'/' #possibility to use local storage
+        print(datapath)
+        turbine_pos_file=datapath+'NorthSea_BalticSea_future_turbine_positions_consistent.csv'
+        turbine_type_file=datapath+'IEA_Reference_15MW_240.csv'
+    else:
+        datapath = '/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/'+exp+'/'
+        turbine_pos_file='/users/nummelin/Projects/mahti_projects/DTO4OWE/DTO4WOE_polygons/NorthSea_BalticSea_future_turbine_positions_consistent.csv'
+        turbine_type_file='/users/nummelin/Projects/mahti_projects/DTO4OWE/IEA_Reference_15MW_240.csv'
+    #
+    output_dir       = '/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/'+exp+'_'+str(year)+'_'+str(month).zfill(2)+'/'
+    final_output_dir = '/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/pywake/'+exp+'/'
+    if not os.path.isdir(output_dir):
+        os.system('mkdir -p '+output_dir)
+        print('created folder '+output_dir)
+    if not os.path.isdir(final_output_dir):
+        os.system('mkdir -p '+final_output_dir)
+        print('created folder '+final_output_dir)
     ##################################################################
     # THERE ARE TOO MANY TURBINES TO PROCESS EVERYTHING ALL AT ONCE
     # THE WORKAROUND IS TO SPLIT TO DIFFERENT REGIONS.
@@ -231,39 +253,41 @@ if __name__ == '__main__':
     ##############################
     # OPEN DATA AND COMPUTE WIND SPEED AND DIRECTION
     #
-    datapath = '/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/'+exp+'/'
     fname100 = 'hl_IFS-NEMO_'+exp+'_'+str(year)+'_'+str(month).zfill(2)+'.nc' #'CERRA_winds_test.nc'
     fname10  = 'sfc_IFS-NEMO_'+exp+'_'+str(year)+'_'+str(month).zfill(2)+'.nc'
-    IFS100orig = xr.open_dataset(datapath+fname100,chunks={"time": 24})
-    IFS10orig  = xr.open_dataset(datapath+fname10, chunks={"time": 24})
-    #
-    
-    IFS100ws   = (np.sqrt(IFS100orig.u**2+IFS100orig.v**2)).to_dataset(name='ws')
-    IFS10ws    = (np.sqrt(IFS10orig['10u']**2+IFS10orig['10v']**2)).to_dataset(name='ws')
-    #
-    IFS100wdir =  np.degrees(xr.apply_ufunc(np.atan2,IFS100orig.v,IFS100orig.u,
-                                            input_core_dims=[[],[]],
-                                            output_core_dims=[[]],
-                                            vectorize=True,
-                                            dask='parallelized',
-                                            output_dtypes=[np.float32],
-                                            )).to_dataset(name='wdir')
-    #
-    IFS10wdir =  np.degrees(xr.apply_ufunc(np.atan2,IFS10orig['10v'],IFS10orig['10u'],
-                                            input_core_dims=[[],[]],
-                                            output_core_dims=[[]],
-                                            vectorize=True,
-                                            dask='parallelized',
-                                            output_dtypes=[np.float32],
-                                            )).to_dataset(name='wdir')
-    #
-    if not Path('/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/'+exp+'/IFS100_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc').is_file():
-        xr.merge([IFS100ws,IFS100wdir]).to_netcdf('/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/'+exp+'/IFS100_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc')
-    if not Path('/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/'+exp+'/IFS10_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc').is_file():
-        xr.merge([IFS10ws,IFS10wdir]).to_netcdf('/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/'+exp+'/IFS10_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc')
-    #
-    IFS100   = xr.open_dataset('/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/'+exp+'/IFS100_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc',chunks={"time": 24}).load()
-    IFS10    = xr.open_dataset('/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/'+exp+'/IFS10_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc',chunks={"time": 24})
+    ############################
+    # PREPROC IF NEEDED
+    if preproc:
+        IFS100orig = xr.open_dataset(datapath+fname100,chunks={"time": 24})
+        IFS10orig  = xr.open_dataset(datapath+fname10, chunks={"time": 24})
+        #
+        IFS100ws   = (np.sqrt(IFS100orig.u**2+IFS100orig.v**2)).to_dataset(name='ws')
+        IFS10ws    = (np.sqrt(IFS10orig['10u']**2+IFS10orig['10v']**2)).to_dataset(name='ws')
+        #
+        IFS100wdir =  np.degrees(xr.apply_ufunc(np.atan2,IFS100orig.v,IFS100orig.u,
+                                                input_core_dims=[[],[]],
+                                                output_core_dims=[[]],
+                                                vectorize=True,
+                                                dask='parallelized',
+                                                output_dtypes=[np.float32],
+                                                )).to_dataset(name='wdir')
+        #
+        IFS10wdir =  np.degrees(xr.apply_ufunc(np.atan2,IFS10orig['10v'],IFS10orig['10u'],
+                                               input_core_dims=[[],[]],
+                                               output_core_dims=[[]],
+                                               vectorize=True,
+                                               dask='parallelized',
+                                               output_dtypes=[np.float32],
+                                               )).to_dataset(name='wdir')
+        #
+        if not Path(datapath+'IFS100_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc').is_file():
+            xr.merge([IFS100ws,IFS100wdir]).to_netcdf(datapath+'IFS100_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc')
+        if not Path(datapath+'IFS10_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc').is_file():
+            xr.merge([IFS10ws,IFS10wdir]).to_netcdf(datapath+'IFS10_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc')
+    #################################
+    # OPEN DATA
+    IFS100   = xr.open_dataset(datapath+'IFS100_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc',chunks={"time": 24}).load()
+    IFS10    = xr.open_dataset(datapath+'IFS10_'+str(year)+'_'+str(month).zfill(2)+'_tmp.nc',chunks={"time": 24})
     #
     ###########################################
     # CREATE GRIDS AND MAPPINGS BETWEEN THEM
@@ -312,68 +336,58 @@ if __name__ == '__main__':
     #regridder_xy2latlon = xe.Regridder(ds_regular_xy,ds_regular_latlon, "bilinear",filename='XY_to_regular.nc',reuse_weights=True)
     regridder_xy2latlon = xe.Regridder(ds_regular_xy,ds_regular_latlon, "conservative",filename='XY_to_regular_conservative_dxdy_'+str(dx/1E3)+'km.nc',reuse_weights=True)
     #
-    if True:#data.time.size>tt:
-        output_dir = '/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/'+exp+'_'+str(year)+'_'+str(month).zfill(2)+'/' # where do you want to put your output
-        final_output_dir = '/scratch/project_2010748/DTO4OWE/CLIMATE_DT/IFS-NEMO/pywake/'+exp+'/'
-        if not os.path.isdir(output_dir):
-            os.system('mkdir -p '+output_dir)
-            print('created folder '+output_dir)
-        if not os.path.isdir(final_output_dir):
-            os.system('mkdir -p '+final_output_dir)
-            print('created folder '+final_output_dir)
-        ###################################
-        # READ TURBINE PROPERTIES
-        #
-        df = pd.read_csv('/users/nummelin/Projects/mahti_projects/DTO4OWE/DTO4WOE_polygons/NorthSea_BalticSea_future_turbine_positions_consistent.csv',delimiter=',')
-        #
-        #
-        latitude=df['latitude'].values
-        longitude=df['longitude'].values
-        wt_x_all, wt_y_all = transformer_latlonToloc.transform(longitude,latitude) #
-        #NREL 15MW wind turbine
-        IEAturbine_carac = pd.read_csv('/users/nummelin/Projects/mahti_projects/DTO4OWE/IEA_Reference_15MW_240.csv',delimiter=',')
-        power_IEA        = IEAturbine_carac['Power [kW]'].values
-        ct               = IEAturbine_carac['Ct [-]'].values
-        u                = IEAturbine_carac['Wind Speed [m/s]'].values
-        h                = 150
-        D                = 240
-        P                = 15e6
-        #
-        IEA15MW = WindTurbine(name='IEA15MW', diameter=D,hub_height=h,
-                              powerCtFunction=PowerCtTabular(u,power_IEA,'kW',ct))
-        #
-        windTurbines = WindTurbines.from_WindTurbine_lst([IEA15MW])
-        #
-        print('loop over turbines')
-        region_turbines = {}
-        for region in regions:
-            wt_x, wt_y, x_slice, y_slice, types, mask = turbine_positions(region,wt_x_all,wt_y_all,df,dy,dx)
-            region_turbines[region] = {
-                "wt_x": np.asarray(wt_x, dtype=np.float32),
-                "wt_y": np.asarray(wt_y, dtype=np.float32),
-                "x_slice": x_slice,
-                "y_slice": y_slice,
-                "mask": mask,
-                }
-        #
-        #
-        for tt, t in enumerate(range(day0*24,IFS100.time.size,24)):
-            print(tt,t,t//24,day0)
-            if not Path(output_dir+'BalticSeaNorthSeaDaily_'+f'ws_{str(t//24).zfill(3)}_'+fname100.split('/')[-1]).is_file():
-                IFS100_reg = regridder_IFS(IFS100.isel(time=slice(t,t+24)))
-                IFS100_reg = IFS100_reg.assign_coords({'longitude':ds_regular_xy.longitude,'latitude':ds_regular_xy.latitude,
-                                                       'x':xr.DataArray(x_reg,dims=('x')),'y':xr.DataArray(y_reg,dims=('y'))})
-                data = xr.merge([IFS100_reg,xr.DataArray(xr.zeros_like(IFS100_reg.ws)).to_dataset(name='mask')]).load()
-                for t0 in range(24):
-                    if t0==0:
-                        ds_final = wake(data.isel(time=t0),region_turbines,windTurbines,t0,fname100,x_reg,y_reg,output_dir=output_dir)
-                    else:
-                        ds_dum = wake(data.isel(time=t0),region_turbines,windTurbines,t0,fname100,x_reg,y_reg,output_dir=output_dir)
-                        ds_final=xr.concat([ds_final,ds_dum],dim='time')
-                ds_final.to_netcdf(output_dir+'BalticSeaNorthSeaDaily_'+f'ws_{str(t//24).zfill(3)}_'+fname100.split('/')[-1])
-        #
-        #
-        ds_final_reg_all  = xr.open_mfdataset(sorted(glob.glob(output_dir+'BalticSeaNorthSeaDaily_ws_*_hl_IFS-NEMO_hist_'+str(year)+'_'+str(month).zfill(2)+'.nc')),concat_dim='time',combine='nested')
+    ###################################
+    # READ TURBINE PROPERTIES
+    #
+    df = pd.read_csv(turbine_pos_file,delimiter=',')
+    #
+    #
+    latitude=df['latitude'].values
+    longitude=df['longitude'].values
+    wt_x_all, wt_y_all = transformer_latlonToloc.transform(longitude,latitude) #
+    #NREL 15MW wind turbine
+    IEAturbine_carac = pd.read_csv(turbine_type_file,delimiter=',')
+    power_IEA        = IEAturbine_carac['Power [kW]'].values
+    ct               = IEAturbine_carac['Ct [-]'].values
+    u                = IEAturbine_carac['Wind Speed [m/s]'].values
+    h                = 150
+    D                = 240
+    P                = 15e6
+    #
+    IEA15MW = WindTurbine(name='IEA15MW', diameter=D,hub_height=h,
+                          powerCtFunction=PowerCtTabular(u,power_IEA,'kW',ct))
+    #
+    windTurbines = WindTurbines.from_WindTurbine_lst([IEA15MW])
+    #
+    print('loop over turbines')
+    region_turbines = {}
+    for region in regions:
+        wt_x, wt_y, x_slice, y_slice, types, mask = turbine_positions(region,wt_x_all,wt_y_all,df,dy,dx)
+        region_turbines[region] = {
+            "wt_x": np.asarray(wt_x, dtype=np.float32),
+            "wt_y": np.asarray(wt_y, dtype=np.float32),
+            "x_slice": x_slice,
+            "y_slice": y_slice,
+            "mask": mask,
+            }
+    # produce daily files
+    for tt, t in enumerate(range(day0*steps_in_day,IFS100.time.size,steps_in_day)):
+        print(tt,t,t//steps_in_day,day0)
+        if not Path(output_dir+'BalticSeaNorthSeaDaily_'+f'ws_{str(t//steps_in_day).zfill(3)}_'+fname100.split('/')[-1]).is_file():
+            IFS100_reg = regridder_IFS(IFS100.isel(time=slice(t,t+steps_in_day)))
+            IFS100_reg = IFS100_reg.assign_coords({'longitude':ds_regular_xy.longitude,'latitude':ds_regular_xy.latitude,
+                                                   'x':xr.DataArray(x_reg,dims=('x')),'y':xr.DataArray(y_reg,dims=('y'))})
+            data = xr.merge([IFS100_reg,xr.DataArray(xr.zeros_like(IFS100_reg.ws)).to_dataset(name='mask')]).load()
+            for t0 in range(steps_in_day):
+                if t0==0:
+                    ds_final = wake(data.isel(time=t0),region_turbines,windTurbines,t0,fname100,x_reg,y_reg,output_dir=output_dir)
+                else:
+                    ds_dum = wake(data.isel(time=t0),region_turbines,windTurbines,t0,fname100,x_reg,y_reg,output_dir=output_dir)
+                    ds_final=xr.concat([ds_final,ds_dum],dim='time')
+            ds_final.to_netcdf(output_dir+'BalticSeaNorthSeaDaily_'+f'ws_{str(t//steps_in_day).zfill(3)}_'+fname100.split('/')[-1])
+    #
+    ds_final_reg_all  = xr.open_mfdataset(sorted(glob.glob(output_dir+'BalticSeaNorthSeaDaily_ws_*_'+fname100.split('/')[-1])),concat_dim='time',combine='nested')
+    if ds_final_reg_all.time.size == IFS100.time.size:
         #
         ds_final_reg = regridder_xy2latlon(ds_final_reg_all).assign_coords({'lon':ds_regular_latlon.lon,'lat':ds_regular_latlon.lat})
         ds_final_reg.to_netcdf(output_dir+'BalticSeaNorthSea_regular_ws100_IFS-NEMO_'+exp+'_'+str(year)+'_'+str(month).zfill(2)+'.nc')
@@ -390,8 +404,10 @@ if __name__ == '__main__':
         wakemask    = 3 * np.abs(all_wakes/IFS100.ws)
         mean_ratio  = (IFS10.ws / IFS100.ws) #consider applying gaussian filter or something here.
         IFS10_wake  = (1 - wakemask) * IFS10.ws + wakemask * IFS10.ws * np.clip((3.266 * np.exp(-5.473 * (mean_ratio + 1.503)) * np.exp(5.341 * ((IFS100.ws-all_wakes)/IFS100.ws) + 0.7554) + 0.8849), 0, 3)
-        v = -IFS10_wake * np.cos((np.arctan2(IFS10orig['10u'], IFS10orig['10v']) * 180/np.pi + 180)*np.pi/180)
-        u = -IFS10_wake * np.sin((np.arctan2(IFS10orig['10u'], IFS10orig['10v']) * 180/np.pi + 180)*np.pi/180)
+        #v = -IFS10_wake * np.cos(np.radians(IFS10.wdir) * 180/np.pi + 180)*np.pi/180)
+        #u = -IFS10_wake * np.sin(np.radians(IFS10.wdir) * 180/np.pi + 180)*np.pi/180)
+        v = IFS10_wake * np.sin(np.radians(IFS10.wdir))
+        u = IFS10_wake * np.cos(np.radians(IFS10.wdir))
         #
         # final wake
         xr.merge([u.rename('u10').to_dataset(),v.rename('v10').to_dataset()]).to_netcdf(final_output_dir+'Baltic_NorthSea_regular_ws_IFS-NEMO_'+exp+'_'+str(year)+'_'+str(month).zfill(2)+'.nc')
